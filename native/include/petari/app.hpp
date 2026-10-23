@@ -28,6 +28,11 @@ extern "C" int petari_host_display_hz(void);
 // Observatory, 3x needs 14 ms.
 extern "C" void petari_host_smooth_motion(bool on);
 
+// The render scale, as a multiple of the game's 456-line framebuffer (1.0 = 640x456 / 810x456), applied at the
+// next frame boundary. A no-op when PETARI_RENDER_SCALE chose one. Used by the stereoscopic window for its
+// eye resolution (Game/System/Stereo.cpp).
+extern "C" void petari_host_set_render_scale(float scale);
+
 // Frame-time marks for the seam's statistics, from GameSystem::frameLoop on
 // the same thread: the retrace wait after the seam returned, and endFrame
 // (its GXDrawDone wait) is starting. A timestamp each; no other effect.

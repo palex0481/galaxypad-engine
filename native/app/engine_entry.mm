@@ -236,6 +236,13 @@ extern "C" __attribute__((visibility("default"))) void galaxypad_engine_stereo_c
     petari_stereo_configure(enabled, depth, convergence);
 }
 
+// The stereoscopic window's eye render height in lines (540 Low, 720 Medium, 1080 High; clamped to 360...1080),
+// applied live. The game renders each eye at this size; the eye images stay 1920x1080.
+extern "C" void petari_stereo_set_resolution(int height);
+extern "C" __attribute__((visibility("default"))) void galaxypad_engine_stereo_set_resolution(int height) {
+    petari_stereo_set_resolution(height);
+}
+
 // Asks the renderer to create the eye IOSurfaces (the next frame); 0 closes the bridge.
 extern "C" __attribute__((visibility("default"))) void galaxypad_engine_stereo_open(int open) {
     petari_stereo_bridge_request(open);

@@ -27,6 +27,11 @@ std::atomic< bool > gRequested{false};
 std::atomic< float > gDepth{1.0f};
 std::atomic< float > gConvergence{1200.0f};
 std::atomic< bool > gEnvChecked{false};
+// Eye render height in lines (the width follows at 16:9): the game renders at height / 456 times its own
+// 640x456 framebuffer, which is what costs GPU time twice per step. 540 / 720 / 1080 are Low / Medium / High.
+constexpr int kGameFramebufferHeight = 456;
+std::atomic< int > gRenderHeight{720};
+int gAppliedHeight = 0;
 
 bool gOn = false;       // this step's state
 bool gViewStage = false;
@@ -45,6 +50,10 @@ void checkEnv() {
         const char* depth = std::getenv("PETARI_STEREO_DEPTH");
         if (depth != nullptr) {
             gDepth.store(static_cast< float >(std::atof(depth)));
+        }
+        const char* height = std::getenv("PETARI_STEREO_HEIGHT");
+        if (height != nullptr && std::atoi(height) > 0) {
+            gRenderHeight.store(std::atoi(height));
         }
         const char* convergence = std::getenv("PETARI_STEREO_CONVERGENCE");
         if (convergence != nullptr) {
@@ -70,6 +79,12 @@ extern "C" void petari_stereo_configure(int enabled, float depth, float converge
     gRequested.store(enabled != 0);
 }
 
+// Host setter: the eye render height in lines (clamped to 360...1080), applied live.
+extern "C" void petari_stereo_set_resolution(int height) {
+    gEnvChecked.store(true);
+    gRenderHeight.store(height < 360 ? 360 : (height > 1080 ? 1080 : height));
+}
+
 namespace Stereo {
 
 bool active() {
@@ -81,8 +96,10 @@ void beginStep() {
     const bool on = active();
     if (on != gOn) {
         gOn = on;
-        // The eye images are 1920x1080: render at 3x the game framebuffer (unless PETARI_RENDER_SCALE chose).
-        petari_host_smooth_motion(on);
+        gAppliedHeight = 0;
+        if (!on) {
+            petari_host_smooth_motion(false);  // back to the screen's pixels
+        }
         petari_present_set_stereo(on ? 3 : 0);
         std::fprintf(stderr, "Petari Stereo: %s\n", on ? "on (each step is drawn once per eye)" : "off");
         gSteps = gEyeSteps = gMonoSteps = 0;
@@ -92,6 +109,13 @@ void beginStep() {
     }
     gViewStage = false;
     petari_present_set_stereo(3);
+    // The game renders at the eye resolution (not the 1920x1080 eye images' 3x of the game framebuffer it used
+    // to, 2432x1368 per eye); the bridge scales the picture to the eye images. Applied when it changes.
+    if (const int height = gRenderHeight.load(); height != gAppliedHeight) {
+        gAppliedHeight = height;
+        petari_host_set_render_scale(static_cast< float >(height) / static_cast< float >(kGameFramebufferHeight));
+        std::fprintf(stderr, "Petari Stereo: eye render size %dx%d\n", (height * 16 + 4) / 9, height);
+    }
     if (++gSteps == 600) {
         std::fprintf(stderr, "Petari Stereo: %lu steps, %lu with two eyes, %lu mono\n", gSteps, gEyeSteps, gMonoSteps);
         gSteps = gEyeSteps = gMonoSteps = 0;

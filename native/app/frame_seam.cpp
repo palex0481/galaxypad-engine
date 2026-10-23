@@ -725,12 +725,23 @@ extern "C" int petari_host_display_hz(void) {
 
 extern "C" void VISetFrameBufferScale(float scale);  // Aurora; applied at the next frame boundary
 
-extern "C" void petari_host_smooth_motion(bool on) {
+static bool renderScaleChosen() {
     static const bool chosen = [] {
         const char* value = std::getenv("PETARI_RENDER_SCALE");
         return value != nullptr && *value != '\0';
     }();
-    if (!chosen) {
+    return chosen;
+}
+
+extern "C" void petari_host_set_render_scale(float scale) {
+    if (!renderScaleChosen() && scale > 0.f && scale <= 8.f) {
+        VISetFrameBufferScale(scale);
+        std::fprintf(stderr, "Petari: render scale %.3fx the game framebuffer (stereo)\n", scale);
+    }
+}
+
+extern "C" void petari_host_smooth_motion(bool on) {
+    if (!renderScaleChosen()) {
         VISetFrameBufferScale(on ? 3.0f : 0.0f);
         std::fprintf(stderr, "Petari: render scale %s\n", on ? "3x the game framebuffer (Smooth Motion)" : "screen pixels");
     }
