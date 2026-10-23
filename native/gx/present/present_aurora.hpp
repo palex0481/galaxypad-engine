@@ -17,6 +17,9 @@ struct Frame {
     uint32_t aspectWidth = 4;      // display aspect for the present viewport
     uint32_t aspectHeight = 3;
     aurora::gfx::TextureHandle xfb;  // the display copy VI latched; kept alive until presented
+    // Stereoscopic window (stereo_bridge.cpp): 0 flat, 1 left eye (rendered to the eye image only; the
+    // window is not presented), 2 right eye (presented, and rendered to the eye image), 3 mono (both eyes).
+    int stereoEye = 0;
 };
 
 // Main thread, in aurora_end_frame after the FIFO is drained (the command
@@ -33,6 +36,11 @@ bool bind_image(const Frame& frame, wgpu::BindGroup& out) noexcept;
 // function when this frame is not dumped.
 void surface_dump_prepare() noexcept;
 std::function<void()> surface_dump_encode(const wgpu::CommandEncoder& encoder, const wgpu::Texture& texture) noexcept;
+
+// Render worker, every frame: creates the eye images when the host asked for them, and for a stereo frame
+// (Frame::stereoEye) encodes the XFB into the eye image(s). Returns the work to run after the frame was
+// submitted (ends the shared-texture access, publishes the images), or an empty function.
+std::function<void()> stereo_encode(const Frame& frame, const wgpu::CommandEncoder& encoder) noexcept;
 
 // Render worker: darkens the image drawn in the pass.
 void draw_dim(const wgpu::RenderPassEncoder& pass, const Frame& frame) noexcept;

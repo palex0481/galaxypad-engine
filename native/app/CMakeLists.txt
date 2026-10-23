@@ -142,7 +142,7 @@ if(NOT _petari_app_standalone)
             wii_save_import.cpp seed_pack.cpp engine_entry.mm)
         set_source_files_properties(engine_entry.mm PROPERTIES COMPILE_DEFINITIONS "${_petari_sdl_renames}")
         target_link_libraries(GalaxyPadEngine PRIVATE petari_app_host petari_app_platform aurora::core SQLite::SQLite3
-            compression "-framework Foundation" "-framework UIKit")
+            compression "-framework Foundation" "-framework UIKit" "-framework IOSurface" "-framework CoreFoundation")
         target_link_options(GalaxyPadEngine PRIVATE "-Wl,-exported_symbol,_galaxypad_engine_*" "-Wl,-dead_strip")
         set_target_properties(GalaxyPadEngine PROPERTIES
             FRAMEWORK TRUE

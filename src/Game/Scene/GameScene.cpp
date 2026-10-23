@@ -1,6 +1,7 @@
 #include "Game/Scene/GameScene.hpp"
 #ifdef PETARI_NATIVE
 #include "Game/System/SmoothMotion.hpp"
+#include "Game/System/Stereo.hpp"
 #endif
 #include "Game/AudioLib/AudSceneMgr.hpp"
 #include "Game/AudioLib/AudWrap.hpp"
@@ -241,6 +242,7 @@ void GameScene::calcAnim() {
     SceneFunction::executeCalcViewAndEntryList();
 #ifdef PETARI_NATIVE
     SmoothMotion::noteViewStage();
+    Stereo::noteViewStage();
 #endif
 }
 

@@ -39,6 +39,7 @@
 #include <JSystem/JKernel/JKRSolidHeap.hpp>
 #include <petari/app.hpp>
 #include "Game/System/SmoothMotion.hpp"
+#include "Game/System/Stereo.hpp"
 // native/platform/gx_sync (GXSync::waitTokensDelivered)
 extern "C" void petari_gx_sync_wait_tokens_delivered(void);
 #include <cstdlib>
@@ -330,7 +331,8 @@ void GameSystem::frameLoop() {
         return value != nullptr && value[0] == '1';
     }();
     // Smooth Motion draws after the update as well (its in-between frame needs this step's state).
-    if (lowLatency || SmoothMotion::enabled()) {
+    Stereo::beginStep();  // stereoscopic window (BETA), first: it turns Smooth Motion off while it is on
+    if (lowLatency || Stereo::active() || SmoothMotion::enabled()) {
         // Smooth Motion (PETARI_SMOOTH_MOTION=1): draw and present a frame halfway
         // between the previous step and this one first, then the step itself.
         SmoothMotion::beginStep();
@@ -338,17 +340,32 @@ void GameSystem::frameLoop() {
         update();
         calcAnim();
         mObjHolder->captureIfAllowForScreenPreserver();
-        if (SmoothMotion::beginBetween()) {
+        if (Stereo::beginEyes()) {
+            // Stereoscopic window (BETA): the left eye is presented eye-only, the right eye is the step's frame.
+            Stereo::beginEye(0);
             draw();
             MainLoopFramework::sManager->endRender();
             MainLoopFramework::sManager->endFrame();
-            petari_host_present_between();
+            Stereo::presentLeftEye();
             petari_gx_sync_wait_tokens_delivered();
-            SmoothMotion::endBetween();
             MainLoopFramework::sManager->beginRender();
+            Stereo::beginEye(1);
+            draw();
+            MainLoopFramework::sManager->endRender();
+            Stereo::endEyes();
+        } else {
+            if (SmoothMotion::beginBetween()) {
+                draw();
+                MainLoopFramework::sManager->endRender();
+                MainLoopFramework::sManager->endFrame();
+                petari_host_present_between();
+                petari_gx_sync_wait_tokens_delivered();
+                SmoothMotion::endBetween();
+                MainLoopFramework::sManager->beginRender();
+            }
+            draw();
+            MainLoopFramework::sManager->endRender();
         }
-        draw();
-        MainLoopFramework::sManager->endRender();
     } else
 #endif
     {

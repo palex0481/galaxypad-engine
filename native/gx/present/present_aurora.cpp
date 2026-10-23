@@ -35,6 +35,7 @@ namespace {
 constexpr float kDimOpacity = 0.5f;
 
 bool gEnabled = false;
+std::atomic<int> gStereoMode{0};  // Frame::stereoEye for the next frame (petari_present_set_stereo)
 // The EFB's aspect, read by the patched window size (any thread).
 std::atomic<bool> gAspectEnabled{false};
 std::atomic<unsigned> gAspectWidth{4};
@@ -357,6 +358,7 @@ Frame takeImpl() noexcept {
     return frame;
   }
   frame.active = true;
+  frame.stereoEye = gStereoMode.load(std::memory_order_relaxed);
   frame.aspectWidth = gVideo.aspectWidth != 0 ? gVideo.aspectWidth : 4;
   frame.aspectHeight = gVideo.aspectHeight != 0 ? gVideo.aspectHeight : 3;
   if (!gVideo.configured || gVideo.black || gVideo.xfb == nullptr) {
@@ -528,6 +530,10 @@ int petari_present_content_aspect(unsigned* width, unsigned* height) {
   *width = petari_present::gAspectWidth.load();
   *height = petari_present::gAspectHeight.load();
   return 1;
+}
+
+void petari_present_set_stereo(int mode) {
+  petari_present::gStereoMode.store(mode, std::memory_order_relaxed);
 }
 
 void petari_present_set_video(const PetariPresentVideo* video) {

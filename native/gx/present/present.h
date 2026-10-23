@@ -25,6 +25,10 @@ void petari_present_enable(void);
 /* The video state for the frame the next aurora_end_frame presents. */
 void petari_present_set_video(const PetariPresentVideo* video);
 
+/* Stereoscopic window (stereo_bridge.cpp): what the next frame is, 0 flat, 1 left eye (eye image only,
+ * the window is not presented), 2 right eye (presented, and the eye image), 3 mono (both eyes). Any thread. */
+void petari_present_set_stereo(int mode);
+
 /* The displayed image's aspect (16:9 or 4:3) while XFBs are presented, for
  * the patched aurora::window::get_window_size: the EFB render target takes
  * this aspect inside the drawable, so the XFB is shown pixel for pixel.

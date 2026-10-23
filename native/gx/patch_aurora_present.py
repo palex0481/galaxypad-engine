@@ -315,11 +315,26 @@ def patch_aurora(text):
     text = replace_once(text, '    wgpu::Texture currentTexture;\n    wgpu::TextureView currentView;\n',
                         '    wgpu::Texture currentTexture;\n    wgpu::TextureView currentView;\n'
                         '    std::function<void()> petariSurfaceDump;\n')
+    # Stereoscopic window (stereo_bridge.cpp): the frame also draws into the eye images. The left eye frame
+    # renders only there (the window is presented by the right eye / mono frame, which keeps the pacing).
+    text = replace_once(text, '    std::function<void()> petariSurfaceDump;\n',
+                        '    std::function<void()> petariSurfaceDump;\n'
+                        '    std::function<void()> petariStereoDone;\n'
+                        '    const bool petariEyeOnly = petariPresent.stereoEye == 1;\n')
+    text = replace_once(text, '      if (window::is_presentable() && g_surface) {\n',
+                        '      if (window::is_presentable() && g_surface && !petariEyeOnly) {\n')
+    text = replace_once(text, '      Log.info("Skipping present; window not presentable");\n',
+                        '      if (!petariEyeOnly) {\n        Log.info("Skipping present; window not presentable");\n      }\n')
+    text = replace_once(text, '    webgpu::gpu_prof::frame_end(encoder);\n',
+                        '    petariStereoDone = petari_present::stereo_encode(petariPresent, encoder);\n'
+                        '    webgpu::gpu_prof::frame_end(encoder);\n')
+    text = replace_once(text, '    } else if (g_surface) {\n      switch (surfaceStatus) {\n',
+                        '    } else if (g_surface && !petariEyeOnly) {\n      switch (surfaceStatus) {\n')
     text = replace_once(text, '        imgui::render(pass, imguiDrawData);\n        pass.End();\n      }\n',
                         '        imgui::render(pass, imguiDrawData);\n        pass.End();\n      }\n'
                         '      petariSurfaceDump = petari_present::surface_dump_encode(encoder, currentTexture);\n')
     text = replace_once(text, '    webgpu::gpu_prof::after_submit();\n',
-                        '    if (petariSurfaceDump) {\n      petariSurfaceDump();\n    }\n    webgpu::gpu_prof::after_submit();\n')
+                        '    if (petariSurfaceDump) {\n      petariSurfaceDump();\n    }\n    if (petariStereoDone) {\n      petariStereoDone();\n    }\n    webgpu::gpu_prof::after_submit();\n')
     text = replace_once(text, '      g_queue.Submit(1, &buffer);\n',
                         '      PetariNative::FrameTelemetry::Scope petariTiming{PetariNative::FrameTelemetry::FrameSubmit};\n'
                         '      g_queue.Submit(1, &buffer);\n')

@@ -220,6 +220,46 @@ extern "C" __attribute__((visibility("default"))) int galaxypad_engine_smooth_mo
     return PetariNative::Mods::enabled(Mod::SmoothMotion) ? 1 : 0;
 }
 
+// Stereoscopic window (BETA; Game/System/Stereo.hpp). The host app shows the two eye images with
+// RealityKit: 1920x1080 BGRA IOSurfaces, a ring per eye, written by the renderer through Dawn's
+// shared texture memory (native/gx/present/stereo_bridge.cpp).
+extern "C" void petari_stereo_configure(int enabled, float depth, float convergence);
+extern "C" void petari_stereo_bridge_request(int open);
+extern "C" int petari_stereo_bridge_status(void);
+extern "C" const char* petari_stereo_bridge_error(void);
+extern "C" void* petari_stereo_bridge_surface(int eye, int slot);
+extern "C" int petari_stereo_bridge_latest(int eye, std::uint64_t* sequence);
+
+// Eye separation scale (1.0 is the default, 0 is flat) and the convergence distance in game units;
+// `enabled` is honored once the bridge is open.
+extern "C" __attribute__((visibility("default"))) void galaxypad_engine_stereo_configure(int enabled, float depth, float convergence) {
+    petari_stereo_configure(enabled, depth, convergence);
+}
+
+// Asks the renderer to create the eye IOSurfaces (the next frame); 0 closes the bridge.
+extern "C" __attribute__((visibility("default"))) void galaxypad_engine_stereo_open(int open) {
+    petari_stereo_bridge_request(open);
+}
+
+// 0 not open or pending, 1 ready, -1 failed (see galaxypad_engine_stereo_error).
+extern "C" __attribute__((visibility("default"))) int galaxypad_engine_stereo_status(void) {
+    return petari_stereo_bridge_status();
+}
+
+extern "C" __attribute__((visibility("default"))) const char* galaxypad_engine_stereo_error(void) {
+    return petari_stereo_bridge_error();
+}
+
+// An eye's IOSurfaceRef (eye 0 left, 1 right; slot 0-3); the engine keeps ownership.
+extern "C" __attribute__((visibility("default"))) void* galaxypad_engine_stereo_surface(int eye, int slot) {
+    return petari_stereo_bridge_surface(eye, slot);
+}
+
+// The newest finished slot of an eye (-1 if none) and its sequence number.
+extern "C" __attribute__((visibility("default"))) int galaxypad_engine_stereo_latest(int eye, std::uint64_t* sequence) {
+    return petari_stereo_bridge_latest(eye, sequence);
+}
+
 // Frames presented so far (the FPS counter).
 extern "C" __attribute__((visibility("default"))) std::uint64_t galaxypad_engine_presented_frames(void) {
     return App::Seam::presentedFrames();

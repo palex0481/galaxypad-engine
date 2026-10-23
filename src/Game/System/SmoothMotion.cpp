@@ -2,6 +2,7 @@
 #ifdef PETARI_NATIVE
 
 #include "Game/System/SmoothMotion.hpp"
+#include "Game/System/Stereo.hpp"
 #include "Game/Camera/CameraContext.hpp"
 #include "Game/Scene/SceneFunction.hpp"
 #include "Game/Scene/SceneObjHolder.hpp"
@@ -176,6 +177,9 @@ namespace SmoothMotion {
 // Mods; mods.txt), on displays of 110 Hz or more. Two presents per step on a 60 Hz
 // display would halve the game's speed.
 bool enabled() {
+    if (Stereo::active()) {
+        return false;  // stereo draws each step twice itself
+    }
     static const int forced = [] {
         const char* value = std::getenv("PETARI_SMOOTH_MOTION");
         return value == nullptr ? -1 : value[0] == '1' ? 1 : 0;
