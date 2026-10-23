@@ -24,12 +24,14 @@
 #include <cstdint>
 #include <cstdio>
 #include <mutex>
+#include <cstring>
 #include <string>
 
 #include "host.hpp"
 #include "petari/audio_sdl.hpp"
 #include "petari/home_menu.hpp"
 #include "petari/input.hpp"
+#include "petari/milestone.hpp"
 #include "petari/mods.hpp"
 
 extern "C" int aurora_main(int argc, char* argv[]);  // app_main.cpp (aurora/main.h renames main)
@@ -221,4 +223,24 @@ extern "C" __attribute__((visibility("default"))) int galaxypad_engine_smooth_mo
 // Frames presented so far (the FPS counter).
 extern "C" __attribute__((visibility("default"))) std::uint64_t galaxypad_engine_presented_frames(void) {
     return App::Seam::presentedFrames();
+}
+
+// 1 while the game's own pause menu (Plus) is up, 0 otherwise. Read from the game's milestone
+// history: PauseMenu.Open when the menu is shown (again after its confirm/save sub-screens),
+// PauseMenu.Close when it is killed. Meant to be polled (main thread, about 60 Hz): the history
+// keeps the last 64 milestones. Observation only, the game is not touched.
+extern "C" __attribute__((visibility("default"))) int galaxypad_engine_game_paused(void) {
+    static std::mutex mutex;
+    static unsigned long next = 0;
+    static bool open = false;
+    std::lock_guard<std::mutex> lock(mutex);
+    const unsigned long count = petari_milestone_count();
+    if (count > next + 64) next = count - 64;  // fell behind the history: skip to the oldest kept
+    for (; next < count; next++) {
+        const char* name = petari_milestone_at(next);
+        if (name == nullptr) continue;
+        if (std::strcmp(name, "PauseMenu.Open") == 0) open = true;
+        else if (std::strcmp(name, "PauseMenu.Close") == 0) open = false;
+    }
+    return open ? 1 : 0;
 }
