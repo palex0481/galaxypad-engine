@@ -243,6 +243,18 @@ extern "C" __attribute__((visibility("default"))) void galaxypad_engine_stereo_s
     petari_stereo_set_resolution(height);
 }
 
+// Host upscaling (MetalFX in the app): the eye pictures are drawn at `lines` (16:9) in the top-left rectangle of the
+// 1920x1080 eye images instead of being scaled across them; 0 is the plain full-image path. The size of each
+// published picture is read back with galaxypad_engine_stereo_slot_size.
+extern "C" void petari_stereo_bridge_set_rect_height(int lines);
+extern "C" int petari_stereo_bridge_slot_size(int eye, int slot, int* width, int* height);
+extern "C" __attribute__((visibility("default"))) void galaxypad_engine_stereo_set_rect(int lines) {
+    petari_stereo_bridge_set_rect_height(lines);
+}
+extern "C" __attribute__((visibility("default"))) int galaxypad_engine_stereo_slot_size(int eye, int slot, int* width, int* height) {
+    return petari_stereo_bridge_slot_size(eye, slot, width, height);
+}
+
 // Asks the renderer to create the eye IOSurfaces (the next frame); 0 closes the bridge.
 extern "C" __attribute__((visibility("default"))) void galaxypad_engine_stereo_open(int open) {
     petari_stereo_bridge_request(open);

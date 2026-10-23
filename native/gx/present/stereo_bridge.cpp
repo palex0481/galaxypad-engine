@@ -41,6 +41,10 @@ struct Slot {
   wgpu::SharedTextureMemory memory;
   wgpu::Texture texture;
   wgpu::TextureView view;
+  // The size of the picture drawn into the slot (the top-left rectangle of the image), written before the slot is
+  // published.
+  std::atomic<uint32_t> width{kWidth};
+  std::atomic<uint32_t> height{kHeight};
 };
 
 struct Eye {
@@ -52,6 +56,9 @@ struct Eye {
 
 std::array<Eye, kEyes> gEyes;
 std::atomic<bool> gRequested{false};
+// Eye picture height in lines when the host upscales (MetalFX): the XFB is then drawn 1:1 into the top-left
+// 16:9 rectangle of that height and the host scales it up to the full image. 0: fill the whole image.
+std::atomic<int> gRectHeight{0};
 std::atomic<int> gStatus{0};  // 0 not open / pending, 1 ready, -1 failed
 std::string gError;           // written before gStatus becomes -1
 bool gCreated = false;        // render worker only
@@ -147,6 +154,14 @@ int encodeEye(const Frame& frame, const wgpu::CommandEncoder& encoder, int eye) 
   const int index = state.next;
   state.next = (state.next + 1) % kSlots;
   Slot& slot = state.slots[index];
+  // The picture's rectangle: the whole image, or (host upscaling) the top-left 16:9 rectangle of gRectHeight lines.
+  uint32_t rectWidth = kWidth, rectHeight = kHeight;
+  if (const int lines = gRectHeight.load(); lines > 0 && lines < static_cast<int>(kHeight)) {
+    rectHeight = static_cast<uint32_t>(lines);
+    rectWidth = std::min<uint32_t>(kWidth, (rectHeight * 16 + 4) / 9);
+  }
+  slot.width.store(rectWidth, std::memory_order_relaxed);
+  slot.height.store(rectHeight, std::memory_order_relaxed);
   wgpu::SharedTextureMemoryBeginAccessDescriptor access{};
   access.initialized = true;
   access.concurrentRead = false;
@@ -168,12 +183,12 @@ int encodeEye(const Frame& frame, const wgpu::CommandEncoder& encoder, int eye) 
   const auto pass = encoder.BeginRenderPass(&passDescriptor);
   wgpu::BindGroup bindGroup;
   if (bind_image(frame, bindGroup)) {
-    const auto viewport = calculate_present_viewport(kWidth, kHeight, frame.aspectWidth, frame.aspectHeight);
+    const auto viewport = calculate_present_viewport(rectWidth, rectHeight, frame.aspectWidth, frame.aspectHeight);
     pass.SetViewport(viewport.left, viewport.top, viewport.width, viewport.height, 0.f, 1.f);
     const auto x = static_cast<uint32_t>(viewport.left);
     const auto y = static_cast<uint32_t>(viewport.top);
-    const auto w = std::min<uint32_t>(static_cast<uint32_t>(viewport.width), kWidth - x);
-    const auto h = std::min<uint32_t>(static_cast<uint32_t>(viewport.height), kHeight - y);
+    const auto w = std::min<uint32_t>(static_cast<uint32_t>(viewport.width), rectWidth - x);
+    const auto h = std::min<uint32_t>(static_cast<uint32_t>(viewport.height), rectHeight - y);
     pass.SetScissorRect(x, y, w, h);
     pass.SetPipeline(g_CopyPipeline);
     pass.SetBindGroup(0, bindGroup, 0, nullptr);
@@ -277,6 +292,24 @@ void* petari_stereo_bridge_surface(int eye, int slot) {
     return nullptr;
   }
   return petari_present::gEyes[eye].slots[slot].surface;
+}
+
+// Host upscaling: the eye pictures are drawn at `lines` (16:9) in the top-left of the eye images and the host scales
+// them up; 0 draws them across the whole image. Each published slot reports its own size (slot_size).
+void petari_stereo_bridge_set_rect_height(int lines) {
+  petari_present::gRectHeight.store(lines);
+}
+
+// The size of the picture in the slot (the top-left rectangle of the image). False if there is no such slot.
+int petari_stereo_bridge_slot_size(int eye, int slot, int* width, int* height) {
+  if (eye < 0 || eye >= petari_present::kEyes || slot < 0 || slot >= petari_present::kSlots ||
+      petari_present::gStatus.load() != 1) {
+    return 0;
+  }
+  const auto& s = petari_present::gEyes[eye].slots[slot];
+  if (width != nullptr) *width = static_cast<int>(s.width.load(std::memory_order_relaxed));
+  if (height != nullptr) *height = static_cast<int>(s.height.load(std::memory_order_relaxed));
+  return 1;
 }
 
 int petari_stereo_bridge_latest(int eye, uint64_t* sequence) {
