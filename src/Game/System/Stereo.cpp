@@ -165,9 +165,7 @@ void noteViewStage() {
 }
 
 bool beginEyes(bool previousStep) {
-    // Depth 0 means both eyes would be identical: draw the step once (the mono path publishes it to both eyes).
-    if (!gOn || gDepth.load() < 0.005f || !(previousStep ? gViewStagePrev : gViewStage) ||
-        !MR::isExistSceneObj(SceneObj_CameraContext)) {
+    if (!gOn || !(previousStep ? gViewStagePrev : gViewStage) || !MR::isExistSceneObj(SceneObj_CameraContext)) {
         if (gOn) {
             gMonoSteps++;
         }
