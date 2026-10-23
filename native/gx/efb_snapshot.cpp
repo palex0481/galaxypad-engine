@@ -304,6 +304,22 @@ bool readSnapshot(std::uint64_t ticket, std::uint16_t x, std::uint16_t y,
     return true;
 }
 
+// Like readSnapshot, but an x/y outside the capture is clamped to its nearest edge pixel. False only when
+// the ticket has no capture.
+bool readSnapshotClamped(std::uint64_t ticket, std::uint16_t x, std::uint16_t y,
+                         std::uint32_t& depth, std::uint32_t& argb) {
+    std::lock_guard lock(snapshotMutex);
+    const auto it = snapshots.find(ticket);
+    if (it == snapshots.end() || !it->second.width || !it->second.height ||
+        it->second.pixels.size() < std::size_t(it->second.width) * it->second.height) return false;
+    const std::uint32_t cx = std::min<std::uint32_t>(x, it->second.width - 1);
+    const std::uint32_t cy = std::min<std::uint32_t>(y, it->second.height - 1);
+    const auto pixel = it->second.pixels[std::size_t(cy) * it->second.width + cx];
+    depth = pixel.depth;
+    argb = pixel.argb;
+    return true;
+}
+
 void retireSnapshots(std::uint64_t throughTicket) {
     HostAllocationScope host;
     std::lock_guard lock(snapshotMutex);
@@ -333,6 +349,11 @@ extern "C" void petari_gx_install_snapshots() {
         PetariNative::GX::retireSnapshots(petari_gx_sync_delivered_ticket());
         PetariNative::GX::captureEfb(ticket, petari_gx_sync_snapshot_ready);
     }, nullptr);
+}
+
+extern "C" bool petari_gx_read_snapshot_clamped(std::uint64_t ticket, std::uint16_t x,
+    std::uint16_t y, std::uint32_t* depth, std::uint32_t* argb) {
+    return PetariNative::GX::readSnapshotClamped(ticket, x, y, *depth, *argb);
 }
 
 extern "C" bool petari_gx_read_snapshot(std::uint64_t ticket, std::uint16_t x,

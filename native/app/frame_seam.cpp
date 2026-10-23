@@ -11,6 +11,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
 
 extern "C" uint64_t petari_gx_pipeline_manifest_failure_count();
 extern "C" void petari_gx_pipeline_report();
@@ -411,6 +414,24 @@ double seconds(TraceClock::duration d) {
     return std::chrono::duration<double>(d).count();
 }
 
+// Process memory footprint (task_vm_info phys_footprint), logged about every 5 s from the frame trace.
+void traceFootprint(TraceClock::time_point now) {
+#ifdef __APPLE__
+    static TraceClock::time_point lastLog{};
+    if (lastLog != TraceClock::time_point{} && now - lastLog < std::chrono::seconds(5)) return;
+    task_vm_info_data_t info{};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS) return;
+    lastLog = now;
+    std::fprintf(stderr, "Petari memory: footprint %.1f MiB (peak %.1f MiB), limit headroom %.1f MiB\n",
+                 info.phys_footprint / 1048576.0, info.ledger_phys_footprint_peak / 1048576.0,
+                 info.limit_bytes_remaining / 1048576.0);
+    std::fflush(stderr);
+#else
+    (void)now;
+#endif
+}
+
 void traceFrame(const Rect& image) {
     if (!gTrace.enabled) {
         return;
@@ -438,6 +459,7 @@ void traceFrame(const Rect& image) {
                  first || sinceLast <= 0.0 ? 0.0 : (gTrace.frames - gTrace.lastFrames) / sinceLast, image.width, image.height, image.x, image.y,
                  gTrace.unpresentableWaits, gTrace.maxFrameMs, gTrace.slowFrames);
     std::fflush(stderr);
+    traceFootprint(now);
     gTrace.last = now;
     gTrace.lastFrames = gTrace.frames;
     gTrace.maxFrameMs = 0.0;

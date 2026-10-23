@@ -22,6 +22,8 @@ aurora::gfx::AfterSubmitCallback encodeSnapshot(const wgpu::CommandEncoder& enco
     const SnapshotSource& source, std::uint64_t ticket, SnapshotReady ready);
 bool readSnapshot(std::uint64_t ticket, std::uint16_t x, std::uint16_t y,
                   std::uint32_t& depth, std::uint32_t& argb);
+bool readSnapshotClamped(std::uint64_t ticket, std::uint16_t x, std::uint16_t y,
+                         std::uint32_t& depth, std::uint32_t& argb);
 void retireSnapshots(std::uint64_t throughTicket);
 struct SnapshotStats {
     std::uint32_t differentColorPixels, writtenDepthPixels;
