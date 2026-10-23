@@ -9,7 +9,7 @@ set(AURORA_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(AURORA_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 # Dawn's prebuilt iOS package is for devices only; the iOS Simulator builds Dawn
 # from Aurora's pinned source commit (AURORA_DAWN_REF), checked in verify_downloads.cmake.
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
+if(CMAKE_SYSTEM_NAME STREQUAL "visionOS" OR (CMAKE_SYSTEM_NAME STREQUAL "iOS" AND CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator"))
     set(AURORA_DAWN_PROVIDER vendor CACHE STRING "" FORCE)
     # Metal only, without the fuzzer and IR tooling that needs a host protoc.
     set(DAWN_BUILD_PROTOBUF OFF CACHE BOOL "" FORCE)
@@ -22,6 +22,14 @@ FetchContent_Declare(aurora
     GIT_REPOSITORY https://github.com/encounter/aurora.git
     GIT_TAG 08122911e8621acb7ded6563813b264bec1494b5)
 FetchContent_MakeAvailable(aurora)
+if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+    # Aurora's `if (IOS)` block (CoreHaptics device rumble) does not fire on visionOS.
+    find_library(COREHAPTICS_FRAMEWORK CoreHaptics REQUIRED)
+    target_sources(aurora_core PRIVATE "${aurora_SOURCE_DIR}/lib/device_ios.mm")
+    set_source_files_properties("${aurora_SOURCE_DIR}/lib/device_ios.mm" TARGET_DIRECTORY aurora_core
+        PROPERTIES COMPILE_FLAGS -fobjc-arc)
+    target_link_libraries(aurora_core PUBLIC ${COREHAPTICS_FRAMEWORK})
+endif()
 include("${CMAKE_CURRENT_LIST_DIR}/verify_downloads.cmake")
 
 set(_petari_regs "${CMAKE_CURRENT_BINARY_DIR}/aurora-regs.cpp")
@@ -380,7 +388,7 @@ endif()
 
 add_library(petari_audio_sdl STATIC "${CMAKE_SOURCE_DIR}/native/audio/sdl_sink.cpp")
 target_link_libraries(petari_audio_sdl PUBLIC petari_platform_audio PRIVATE SDL3::SDL3 petari_host_runtime)
-if(APPLE AND NOT IOS)
+if(APPLE AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "visionOS")
     target_link_libraries(petari_audio_sdl PRIVATE "-framework CoreAudio")
 endif()
 if(_petari_build_testing)

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(PetariNative LANGUAGES C CXX ASM)
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(CMAKE_SYSTEM_NAME MATCHES "^(iOS|visionOS)$")
     enable_language(OBJCXX)  # GalaxyPadEngine's entry (native/app/engine_entry.mm)
 endif()
 

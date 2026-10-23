@@ -111,7 +111,7 @@ if(NOT _petari_app_standalone)
     # Objective-C class names are process-wide, so every class SDL implements is
     # renamed with a GPE_ prefix here. GalaxyPad copies the pipeline seeds from this
     # directory's pipeline-seeds/ into its app bundle.
-    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    if(CMAKE_SYSTEM_NAME MATCHES "^(iOS|visionOS)$")
         include(FetchContent)
         FetchContent_GetProperties(SDL SOURCE_DIR _petari_sdl_source)
         if(NOT TARGET SDL3-static OR NOT IS_DIRECTORY "${_petari_sdl_source}/src")

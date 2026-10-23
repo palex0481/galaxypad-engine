@@ -2,7 +2,7 @@
 # builds (GalaxyPad's New engine) check them against recorded SHA-256 values, so a
 # changed upstream archive fails the build instead of changing the engine. Update
 # these entries together with the Aurora pin in native/gx/CMakeLists.txt.
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(CMAKE_SYSTEM_NAME MATCHES "^(iOS|visionOS)$")
     set(_petari_pinned_downloads
         "sdl|release-3.4.10.tar.gz|0dc11d980ba17250200718fa4e28011da293f27ed92f92203afffe396811f307")
     if(AURORA_DAWN_PROVIDER STREQUAL "vendor")
