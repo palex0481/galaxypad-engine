@@ -255,6 +255,16 @@ extern "C" __attribute__((visibility("default"))) int galaxypad_engine_stereo_sl
     return petari_stereo_bridge_slot_size(eye, slot, width, height);
 }
 
+// 3D portal window: its size, the world scale, and the eyes' positions in the window's space (see Game/System/Stereo.cpp).
+extern "C" void petari_stereo_set_portal(int enabled, float halfWidth, float halfHeight, float unitsPerMetre);
+extern "C" void petari_stereo_set_portal_eyes(const float* six);
+extern "C" __attribute__((visibility("default"))) void galaxypad_engine_portal_configure(int enabled, float halfWidth, float halfHeight, float unitsPerMetre) {
+    petari_stereo_set_portal(enabled, halfWidth, halfHeight, unitsPerMetre);
+}
+extern "C" __attribute__((visibility("default"))) void galaxypad_engine_portal_set_eyes(const float* six) {
+    petari_stereo_set_portal_eyes(six);
+}
+
 // Asks the renderer to create the eye IOSurfaces (the next frame); 0 closes the bridge.
 extern "C" __attribute__((visibility("default"))) void galaxypad_engine_stereo_open(int open) {
     petari_stereo_bridge_request(open);
