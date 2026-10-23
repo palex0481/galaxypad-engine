@@ -279,6 +279,17 @@ extern "C" __attribute__((visibility("default"))) int galaxypad_engine_stereo_la
     return petari_stereo_bridge_latest(eye, sequence);
 }
 
+// Ambient glow for the flat window (native/gx/present/present_aurora.cpp): enable sampling of the picture's
+// edges, and read the newest 64 RGB values (192 bytes, 4 edges x 16 cells) with a sequence number.
+extern "C" void petari_present_glow_enable(int enabled);                      // gx/present/present.h
+extern "C" unsigned long long petari_present_glow_colors(unsigned char* rgb);  // gx/present/present.h
+extern "C" __attribute__((visibility("default"))) void galaxypad_engine_glow_enable(int enabled) {
+    petari_present_glow_enable(enabled);
+}
+extern "C" __attribute__((visibility("default"))) std::uint64_t galaxypad_engine_glow_colors(unsigned char* rgb192) {
+    return petari_present_glow_colors(rgb192);
+}
+
 // Frames presented so far (the FPS counter).
 extern "C" __attribute__((visibility("default"))) std::uint64_t galaxypad_engine_presented_frames(void) {
     return App::Seam::presentedFrames();

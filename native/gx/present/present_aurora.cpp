@@ -350,6 +350,115 @@ void maybeDumpXfb(const aurora::gfx::TextureHandle& xfb) {
   aurora::gfx::render_worker::enqueue_work([xfb, path = std::move(path)] { dumpXfb(xfb, path); });
 }
 
+
+// --- Ambient glow (the host's "Ambient glow" option, flat window only) ------------------------
+// While enabled, about 20 times a second a tiny compute pass on the render worker averages 16 cells along each
+// edge of the presented XFB (a band 7% deep, 8x6 taps per cell) into 64 packed RGB values (256 bytes). Those are
+// copied to a small buffer and mapped asynchronously (no wait, no full-frame readback). Nothing runs while
+// disabled. Cell order: top (left to right), right (top to bottom), bottom (left to right), left (top to bottom).
+constexpr uint32_t kGlowCells = 16;
+constexpr uint32_t kGlowValues = kGlowCells * 4;
+constexpr auto kGlowInterval = std::chrono::milliseconds(50);
+std::atomic<bool> gGlowEnabled{false};
+std::mutex gGlowMutex;
+uint32_t gGlowPacked[kGlowValues] = {};
+uint64_t gGlowSequence = 0;
+std::chrono::steady_clock::time_point gGlowLast{};
+
+constexpr const char* kGlowShader = R"(
+@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var<storage, read_write> outColors: array<u32>;
+@compute @workgroup_size(16, 4, 1)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let cell = id.x;
+  let edge = id.y;
+  let size = vec2f(textureDimensions(src));
+  var sum = vec3f(0.0);
+  for (var j = 0u; j < 6u; j++) {
+    for (var i = 0u; i < 8u; i++) {
+      let along = (f32(cell) + (f32(i) + 0.5) / 8.0) / 16.0;
+      let depth = (f32(j) + 0.5) / 6.0 * 0.07;
+      var p = vec2f(along, depth);
+      if (edge == 1u) { p = vec2f(1.0 - depth, along); }
+      if (edge == 2u) { p = vec2f(along, 1.0 - depth); }
+      if (edge == 3u) { p = vec2f(depth, along); }
+      let xy = vec2i(clamp(p * size, vec2f(0.0), size - vec2f(1.0)));
+      sum += clamp(textureLoad(src, xy, 0).rgb, vec3f(0.0), vec3f(1.0));
+    }
+  }
+  let c = vec3u(round(sum / 48.0 * 255.0));
+  outColors[edge * 16u + cell] = (c.r << 16u) | (c.g << 8u) | c.b;
+}
+)";
+
+// Render worker.
+void sampleGlow(const aurora::gfx::TextureHandle& xfb) {
+  PetariNative::HostAllocationScope host;
+  using aurora::webgpu::g_device;
+  using aurora::webgpu::g_queue;
+  static wgpu::ComputePipeline* pipeline = nullptr;
+  static wgpu::Buffer storage;
+  static wgpu::Buffer readback[2];
+  static std::atomic<int> busy[2] = {0, 0};
+  constexpr uint64_t bytes = kGlowValues * 4;
+  if (!pipeline) {
+    const wgpu::ShaderSourceWGSL wgsl{wgpu::ShaderSourceWGSL::Init{.code = kGlowShader}};
+    const wgpu::ShaderModuleDescriptor moduleDesc{.nextInChain = &wgsl, .label = "Petari glow"};
+    const auto module = g_device.CreateShaderModule(&moduleDesc);
+    const wgpu::ComputePipelineDescriptor pipelineDesc{
+        .label = "Petari glow", .compute = wgpu::ComputeState{.module = module, .entryPoint = "main"}};
+    pipeline = new wgpu::ComputePipeline(g_device.CreateComputePipeline(&pipelineDesc));
+    const wgpu::BufferDescriptor storageDesc{
+        .label = "Petari glow storage", .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc, .size = bytes};
+    storage = g_device.CreateBuffer(&storageDesc);
+    for (auto& buffer : readback) {
+      const wgpu::BufferDescriptor readDesc{
+          .label = "Petari glow readback", .usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst, .size = bytes};
+      buffer = g_device.CreateBuffer(&readDesc);
+    }
+  }
+  aurora::webgpu::g_instance.ProcessEvents();  // delivers finished maps
+  const int slot = busy[0].load() == 0 ? 0 : (busy[1].load() == 0 ? 1 : -1);
+  if (slot < 0) return;  // both reads still in flight: skip this sample
+  const std::array entries{wgpu::BindGroupEntry{.binding = 0, .textureView = xfb->sampleTextureView},
+                           wgpu::BindGroupEntry{.binding = 1, .buffer = storage, .size = bytes}};
+  const wgpu::BindGroupDescriptor bindDesc{
+      .label = "Petari glow", .layout = pipeline->GetBindGroupLayout(0), .entryCount = entries.size(), .entries = entries.data()};
+  const auto binding = g_device.CreateBindGroup(&bindDesc);
+  const auto encoder = g_device.CreateCommandEncoder();
+  const auto pass = encoder.BeginComputePass();
+  pass.SetPipeline(*pipeline);
+  pass.SetBindGroup(0, binding);
+  pass.DispatchWorkgroups(1, 1);
+  pass.End();
+  encoder.CopyBufferToBuffer(storage, 0, readback[slot], 0, bytes);
+  const auto commands = encoder.Finish();
+  g_queue.Submit(1, &commands);
+  busy[slot] = 1;
+  readback[slot].MapAsync(wgpu::MapMode::Read, 0, bytes, wgpu::CallbackMode::AllowSpontaneous,
+                          [slot](wgpu::MapAsyncStatus status, wgpu::StringView) {
+                            if (status == wgpu::MapAsyncStatus::Success) {
+                              const auto* data = static_cast<const uint32_t*>(readback[slot].GetConstMappedRange(0, bytes));
+                              if (data != nullptr) {
+                                std::lock_guard<std::mutex> lock(gGlowMutex);
+                                std::copy(data, data + kGlowValues, gGlowPacked);
+                                ++gGlowSequence;
+                              }
+                              readback[slot].Unmap();
+                            }
+                            busy[slot] = 0;
+                          });
+}
+
+// Main thread, once per presented frame with an XFB.
+void maybeSampleGlow(const aurora::gfx::TextureHandle& xfb) {
+  if (!gGlowEnabled.load(std::memory_order_relaxed)) return;
+  const auto now = std::chrono::steady_clock::now();
+  if (now - gGlowLast < kGlowInterval) return;
+  gGlowLast = now;
+  aurora::gfx::render_worker::enqueue_work([xfb] { sampleGlow(xfb); });
+}
+
 }  // namespace
 
 Frame takeImpl() noexcept {
@@ -378,6 +487,7 @@ Frame takeImpl() noexcept {
   frame.black = false;
   frame.xfb = it->second.handle;
   maybeDumpXfb(frame.xfb);
+  maybeSampleGlow(frame.xfb);
   frame.dimOpacity = gVideo.dimmed ? kDimOpacity : 0.0f;
   if (traceSizes()) {
     traceFrame(frame);
@@ -539,6 +649,22 @@ void petari_present_set_stereo(int mode) {
 void petari_present_set_video(const PetariPresentVideo* video) {
   petari_present::gVideo = *video;
   petari_present::setContentAspect(video->aspectWidth, video->aspectHeight);
+}
+
+
+void petari_present_glow_enable(int enabled) {
+  petari_present::gGlowEnabled.store(enabled != 0, std::memory_order_relaxed);
+}
+
+uint64_t petari_present_glow_colors(unsigned char* rgb) {
+  std::lock_guard<std::mutex> lock(petari_present::gGlowMutex);
+  for (uint32_t i = 0; i < petari_present::kGlowValues; ++i) {
+    const uint32_t packed = petari_present::gGlowPacked[i];
+    rgb[i * 3] = static_cast<unsigned char>(packed >> 16);
+    rgb[i * 3 + 1] = static_cast<unsigned char>(packed >> 8);
+    rgb[i * 3 + 2] = static_cast<unsigned char>(packed);
+  }
+  return petari_present::gGlowSequence;
 }
 
 int petari_present_image_rect(float* x, float* y, float* width, float* height) {
