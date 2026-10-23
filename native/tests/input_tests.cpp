@@ -1395,6 +1395,27 @@ void testSteering() {
     check(acc.x >= 0.65f, "Ray, D: turn right");
     lift(In::Key::D);
 
+    // A controller's stick that does not reach its rim still turns (0.85 of
+    // travel is 0.81 past the dead zone, which alone is only 36 degrees).
+    In::padAxisEvent(In::PadAxis::LeftX, -0.85f);
+    ride(In::Steering::Ray, 40);
+    rig.pad->getAcceleration(&acc, WPAD_DEV_CORE);
+    check(acc.x <= -0.65f && acc.y >= -0.5f, "Ray, left stick at 85%: turn left");
+    In::padAxisEvent(In::PadAxis::LeftX, 0.85f);
+    ride(In::Steering::Ray, 40);
+    rig.pad->getAcceleration(&acc, WPAD_DEV_CORE);
+    check(acc.x >= 0.65f, "Ray, right stick at 85%: turn right");
+    In::padAxisEvent(In::PadAxis::LeftX, 0.0f);
+    // The controller's own lean (DualSense), no stick.
+    In::setPadTilt(-1.0f);
+    ride(In::Steering::Ray, 40);
+    rig.pad->getAcceleration(&acc, WPAD_DEV_CORE);
+    check(acc.x <= -0.65f && acc.y >= -0.5f, "Ray, controller leaning left: turn left");
+    In::setPadTilt(0.0f);
+    ride(In::Steering::Ray, 40);
+    rig.pad->getAcceleration(&acc, WPAD_DEV_CORE);
+    check(std::fabs(acc.x) < 0.25f && std::fabs(acc.y) < 0.45f, "Ray, lean released: level again");
+
     // A stray T before the Ray does not stand the remote up.
     press(In::Key::T);
     rig.frame();

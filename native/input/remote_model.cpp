@@ -8,6 +8,8 @@ namespace {
 
 constexpr float kPi = 3.14159265358979f;
 constexpr float kDiagonal = 0.70710678f;
+// Ray surfing: the stick length that gives the full twist is 1 / this (see updateMotion).
+constexpr float kRayStickGain = 1.5f;
 
 float radians(float degrees) {
     return degrees * (kPi / 180.0f);
@@ -287,6 +289,7 @@ void RemoteModel::padAxisEvent(PadAxis axis, float value) {
 }
 
 void RemoteModel::padDisconnected() {
+    mPadTilt = 0.0f;
     for (int i = 0; i < static_cast<int>(PadButton::Count); ++i) {
         if (mPad[i]) {
             inputChanged(Binding::pad(static_cast<PadButton>(i)), false);
@@ -439,6 +442,16 @@ void RemoteModel::updateMotion(float stickX, float stickY) {
         upright = mSteering == Steering::Ball;
         if (mSteering == Steering::Ray) {
             stickY = 0.0f;
+            // SurfRayTutorial's "turn" needs a twist of about 41 degrees of the
+            // 45 allowed (0.65 g), which a stick that does not quite reach its
+            // rim (an N64 pad's gate, a diagonal) would miss. So 2/3 of the
+            // stick's travel already gives the full twist.
+            stickX = std::clamp(stickX * kRayStickGain, -1.0f, 1.0f);
+            // The controller's own lean (a DualSense held like a wheel), when
+            // it is the stronger input.
+            if (std::fabs(mPadTilt) > std::fabs(stickX)) {
+                stickX = mPadTilt;
+            }
         }
     }
     const float base = upright ? radians(kUprightPitchDegrees) : 0.0f;

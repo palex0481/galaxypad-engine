@@ -863,6 +863,18 @@ void motionControlShown(Steering steering) {
     model().motionControlShown(steering);
 }
 
+bool steeringActive(Steering* steering) {
+    std::lock_guard<std::mutex> lock(gHostMutex);
+    if (!model().motionControlActive()) return false;
+    if (steering) *steering = model().steering();
+    return true;
+}
+
+void setPadTilt(float lean) {
+    std::lock_guard<std::mutex> lock(gHostMutex);
+    model().setPadTilt(lean);
+}
+
 void setConnected(int chan, bool connected) {
     if (chan < 0 || chan >= kChannels) {
         misuse("setConnected", "channel out of range");

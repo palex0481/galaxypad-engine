@@ -150,6 +150,21 @@ extern "C" __attribute__((visibility("default"))) void galaxypad_engine_input(st
     }
 }
 
+// Ride steering (Ray surfing). galaxypad_engine_set_tilt: a controller's own lean,
+// -1 (full left) .. 1 (full right), 0 for none; used only while Ray surfing
+// steers, and the left stick still works (the stronger of the two wins).
+// galaxypad_engine_steering: what the game steers by tilt right now (the hint
+// lapses 100 ms after the game last asked): 0 none, 1 Star Ball, 2 Ray.
+extern "C" __attribute__((visibility("default"))) void galaxypad_engine_set_tilt(float lean) {
+    Input::setPadTilt(lean);
+}
+
+extern "C" __attribute__((visibility("default"))) int galaxypad_engine_steering(void) {
+    Input::Steering steering;
+    if (!Input::steeringActive(&steering)) return 0;
+    return steering == Input::Steering::Ray ? 2 : 1;
+}
+
 // Where the game image is, as fractions of the window (GalaxyPad's pointer
 // area). Returns 0 before the first frame.
 extern "C" __attribute__((visibility("default"))) int galaxypad_engine_image(float* x, float* y, float* width,

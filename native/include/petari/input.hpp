@@ -283,6 +283,13 @@ enum class Steering : std::uint8_t {
     Ray,   // Ray surfing (SurfRay::updateRide): level, A/D twist, W/S ignored
 };
 void motionControlShown(Steering steering);
+// Host side: which ride the game is steering by tilt right now (the last
+// motionControlShown within 100 ms), or none. Any thread.
+bool steeringActive(Steering* steering);
+// Host side: a controller's own lean, for ride steering. -1 (full left) .. 1
+// (full right), 0 for none. Used only while Ray surfing steers; the left stick
+// still works, and the stronger of the two wins. Any thread.
+void setPadTilt(float lean);
 
 // Presses (down edges, OS repeats ignored) of an input bound to a mod action
 // since the last call, then zero. Any thread. Other actions always return 0.

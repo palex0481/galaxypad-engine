@@ -3,6 +3,7 @@
 // report out. Pure and deterministic; the WPAD layer (wpad_host.cpp) owns
 // locking and timing.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -104,6 +105,9 @@ public:
         mSteering = steering;
     }
     bool motionControlActive() const;
+    Steering steering() const { return mSteering; }
+    // A controller's own lean (-1 left .. 1 right) for Ray surfing.
+    void setPadTilt(float lean) { mPadTilt = lean == lean ? std::clamp(lean, -1.0f, 1.0f) : 0.0f; }
 
     // A bound input went down since the last call (reconnects a remote).
     bool takeActivity();
@@ -178,6 +182,7 @@ private:
     std::uint64_t mTitlePromptReport = 0;  // report of the last titlePromptShown (0: none)
     std::uint64_t mMotionReport = 0;       // report of the last motionControlShown (0: none)
     Steering mSteering = Steering::Ball;
+    float mPadTilt = 0.0f;  // see setPadTilt
 };
 
 }  // namespace PetariNative::Input::Detail
