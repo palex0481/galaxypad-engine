@@ -13,7 +13,6 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#include <mutex>
 
 // native/gx/present/stereo_bridge.cpp (Aurora side).
 extern "C" void petari_present_set_stereo(int mode);  // 0 off, 1 left eye only, 2 right eye (presents), 3 mono
@@ -35,16 +34,6 @@ std::atomic< bool > gEnvChecked{false};
 constexpr int kGameFramebufferHeight = 456;
 std::atomic< int > gRenderHeight{720};
 int gAppliedHeight = 0;
-
-// 3D portal window (host setters below): the eyes' real positions in the window's own space (metres, origin at the
-// window's centre, +x right, +y up, +z toward the viewer) and the window's half size. The game camera sits on the glass.
-std::atomic< bool > gPortal{false};
-std::atomic< float > gPortalHalfWidth{0.5f};
-std::atomic< float > gPortalHalfHeight{0.28125f};
-std::atomic< float > gPortalUnitsPerMetre{800.0f};  // game units per metre: how small the world behind the glass is
-std::mutex gPortalMutex;
-float gPortalEyes[2][3] = {{-0.032f, 0.0f, 1.5f}, {0.032f, 0.0f, 1.5f}};
-bool gPortalEyesKnown = false;
 
 bool gOn = false;       // this step's state
 bool gViewStage = false;
@@ -99,23 +88,6 @@ extern "C" void petari_stereo_configure(int enabled, float depth, float converge
         gConvergence.store(convergence);
     }
     gRequested.store(enabled != 0);
-}
-
-// Host setter: the 3D portal window on or off, the window's half width/height in metres, game units per metre.
-extern "C" void petari_stereo_set_portal(int enabled, float halfWidth, float halfHeight, float unitsPerMetre) {
-    gPortalHalfWidth.store(halfWidth > 0.01f ? halfWidth : 0.5f);
-    gPortalHalfHeight.store(halfHeight > 0.01f ? halfHeight : 0.28125f);
-    gPortalUnitsPerMetre.store(unitsPerMetre > 10.0f ? unitsPerMetre : 800.0f);
-    gPortal.store(enabled != 0);
-}
-
-// Host setter: both eyes' positions (left x y z, right x y z) in the window's space, in metres. Called often.
-extern "C" void petari_stereo_set_portal_eyes(const float* six) {
-    std::lock_guard< std::mutex > lock(gPortalMutex);
-    for (int i = 0; i < 6; ++i) {
-        gPortalEyes[i / 3][i % 3] = six[i];
-    }
-    gPortalEyesKnown = true;
 }
 
 // Host setter: the eye render height in lines (clamped to 360...1080), applied live.
@@ -194,7 +166,7 @@ void noteViewStage() {
 
 bool beginEyes(bool previousStep) {
     // Depth 0 means both eyes would be identical: draw the step once (the mono path publishes it to both eyes).
-    if (!gOn || (gDepth.load() < 0.005f && !gPortal.load()) || !(previousStep ? gViewStagePrev : gViewStage) ||
+    if (!gOn || gDepth.load() < 0.005f || !(previousStep ? gViewStagePrev : gViewStage) ||
         !MR::isExistSceneObj(SceneObj_CameraContext)) {
         if (gOn) {
             gMonoSteps++;
@@ -213,49 +185,6 @@ bool beginEyes(bool previousStep) {
 void beginEye(int eye) {
     if (!gEyes) {
         return;
-    }
-    if (gPortal.load()) {
-        float e[3] = {0, 0, 0};
-        bool known;
-        {
-            std::lock_guard< std::mutex > lock(gPortalMutex);
-            known = gPortalEyesKnown;
-            for (int i = 0; i < 3; ++i) {
-                e[i] = gPortalEyes[eye][i];
-            }
-        }
-        // The projection's depth terms give back the game's own near and far (m22 = -n/(f-n), m23 = -fn/(f-n)).
-        const float a = -gSavedProjection.mMtx[2][2];
-        const float b = -gSavedProjection.mMtx[2][3];
-        if (known && gSavedProjection.mMtx[3][2] < -0.5f && a > 0.0f && b > 0.0f) {
-            const float units = gPortalUnitsPerMetre.load();
-            const float hw = gPortalHalfWidth.load();
-            const float hh = gPortalHalfHeight.load();
-            const float ez = e[2] < 0.15f ? 0.15f : e[2];  // never at or behind the glass
-            const float far0 = b / a;
-            const float near0 = far0 * a / (1.0f + a);
-            // The eye is at (ex, ey, ez) * units from the game camera, which sits at the glass's centre: the world moves the
-            // other way in view space.
-            gContext->mView = gSavedView;
-            gContext->mView.mMtx[0][3] -= e[0] * units;
-            gContext->mView.mMtx[1][3] -= e[1] * units;
-            gContext->mView.mMtx[2][3] -= ez * units;
-            PSMTXInverse(gContext->mView.mMtx, gContext->mViewInv.mMtx);
-            // The frustum is the one from the eye through the window's rectangle (off-axis), starting at the glass.
-            const float n = near0 + ez * units;
-            const float f = far0 + ez * units;
-            gContext->mProjection = gSavedProjection;
-            gContext->mProjection.mMtx[0][0] = ez / hw;
-            gContext->mProjection.mMtx[0][2] = -e[0] / hw;
-            gContext->mProjection.mMtx[1][1] = ez / hh;
-            gContext->mProjection.mMtx[1][2] = -e[1] / hh;
-            gContext->mProjection.mMtx[2][2] = -n / (f - n);
-            gContext->mProjection.mMtx[2][3] = -(f * n) / (f - n);
-            reView();
-            petari_present_set_stereo(eye == 0 ? 1 : 2);
-            gLeftEye = eye == 0;
-            return;
-        }
     }
     const float convergence = gConvergence.load();
     // Full separation between the eyes; each eye is half of it from the game camera.
