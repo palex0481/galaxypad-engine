@@ -10,12 +10,14 @@
 #include <petari/app.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 
 // native/gx/present/stereo_bridge.cpp (Aurora side).
 extern "C" void petari_present_set_stereo(int mode);  // 0 off, 1 left eye only, 2 right eye (presents), 3 mono
-extern "C" int petari_stereo_bridge_status(void);     // 1 once the host's IOSurfaces are imported
+extern "C" int petari_stereo_bridge_status(void);
+extern "C" unsigned long long petari_gx_processor_busy_total(void);  // native/gx/sync_backend.cpp: FIFO processor thread busy ns     // 1 once the host's IOSurfaces are imported
 
 namespace {
 
@@ -35,11 +37,20 @@ int gAppliedHeight = 0;
 
 bool gOn = false;       // this step's state
 bool gViewStage = false;
+bool gViewStagePrev = false;  // the previous step's, for the Wii order (draw first, then update)
+bool gLeftEye = false;
 bool gEyes = false;     // between beginEyes and endEyes
 TPos3f gSavedView, gSavedInv;
 TProj3f gSavedProjection;
 CameraContext* gContext = nullptr;
 unsigned long gSteps = 0, gEyeSteps = 0, gMonoSteps = 0;
+using Clock = std::chrono::steady_clock;
+Clock::time_point gLastMark;
+double gPhaseMs[Stereo::PhaseCount] = {};
+Clock::time_point gStepStart;
+double gStepMs = 0.0, gStepMsMax = 0.0;
+unsigned long long gBusyAtReset = 0;
+unsigned long gSlowSteps = 0;  // steps over 16.7 ms
 
 void checkEnv() {
     if (!gEnvChecked.exchange(true)) {
@@ -107,7 +118,18 @@ void beginStep() {
     if (!on) {
         return;
     }
+    gViewStagePrev = gViewStage;
     gViewStage = false;
+    {
+        const Clock::time_point now = Clock::now();
+        if (gSteps > 0) {
+            const double ms = std::chrono::duration< double, std::milli >(now - gStepStart).count();
+            gStepMs += ms;
+            gStepMsMax = ms > gStepMsMax ? ms : gStepMsMax;
+            gSlowSteps += ms > 16.7 ? 1 : 0;
+        }
+        gStepStart = gLastMark = now;
+    }
     petari_present_set_stereo(3);
     // The game renders at the eye resolution (not the 1920x1080 eye images' 3x of the game framebuffer it used
     // to, 2432x1368 per eye); the bridge scales the picture to the eye images. Applied when it changes.
@@ -118,6 +140,22 @@ void beginStep() {
     }
     if (++gSteps == 600) {
         std::fprintf(stderr, "Petari Stereo: %lu steps, %lu with two eyes, %lu mono\n", gSteps, gEyeSteps, gMonoSteps);
+        const double n = static_cast< double >(gSteps);
+        std::fprintf(stderr,
+                     "Petari Stereo timing (ms per step, mean of %lu): step %.2f (max %.1f, %lu over 16.7) = update %.2f + calcAnim %.2f + "
+                     "draw left %.2f + present left %.2f + draw right %.2f + end frame %.2f + seam %.2f + retrace wait %.2f\n",
+                     gSteps, gStepMs / n, gStepMsMax, gSlowSteps, gPhaseMs[PhaseUpdate] / n, gPhaseMs[PhaseCalcAnim] / n,
+                     gPhaseMs[PhaseDrawLeft] / n, gPhaseMs[PhasePresentLeft] / n, gPhaseMs[PhaseDrawRight] / n,
+                     gPhaseMs[PhaseEndFrame] / n, gPhaseMs[PhaseSeam] / n, gPhaseMs[PhaseRetrace] / n);
+        const unsigned long long busy = petari_gx_processor_busy_total();
+        std::fprintf(stderr, "Petari Stereo GX processor thread: %.2f ms busy per step (decoding GX commands into draws; runs alongside the game thread)\n",
+                     static_cast< double >(busy - gBusyAtReset) / 1e6 / n);
+        gBusyAtReset = busy;
+        for (double& ms : gPhaseMs) {
+            ms = 0.0;
+        }
+        gStepMs = gStepMsMax = 0.0;
+        gSlowSteps = 0;
         gSteps = gEyeSteps = gMonoSteps = 0;
     }
 }
@@ -126,8 +164,8 @@ void noteViewStage() {
     gViewStage = true;
 }
 
-bool beginEyes() {
-    if (!gOn || !gViewStage || !MR::isExistSceneObj(SceneObj_CameraContext)) {
+bool beginEyes(bool previousStep) {
+    if (!gOn || !(previousStep ? gViewStagePrev : gViewStage) || !MR::isExistSceneObj(SceneObj_CameraContext)) {
         if (gOn) {
             gMonoSteps++;
         }
@@ -159,6 +197,11 @@ void beginEye(int eye) {
     gContext->mProjection.mMtx[0][2] -= gContext->mProjection.mMtx[0][0] * offset / convergence;
     reView();
     petari_present_set_stereo(eye == 0 ? 1 : 2);
+    gLeftEye = eye == 0;
+}
+
+bool skipDrawSync() {
+    return gEyes && gLeftEye;
 }
 
 void endEyes() {
@@ -169,8 +212,18 @@ void endEyes() {
     gContext->mViewInv = gSavedInv;
     gContext->mProjection = gSavedProjection;
     gEyes = false;
+    gLeftEye = false;
     // The next step's calcAnim re-runs the 3D view stage; only the view matrix the game reads is restored.
     MR::loadViewMtx();
+}
+
+void mark(Phase phase) {
+    if (!gOn) {
+        return;
+    }
+    const Clock::time_point now = Clock::now();
+    gPhaseMs[phase] += std::chrono::duration< double, std::milli >(now - gLastMark).count();
+    gLastMark = now;
 }
 
 void presentLeftEye() {

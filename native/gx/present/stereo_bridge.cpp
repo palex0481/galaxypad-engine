@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <cstdint>
 #include <cstdio>
@@ -55,6 +56,26 @@ struct Eye {
 };
 
 std::array<Eye, kEyes> gEyes;
+// GPU latency statistics: queue submit -> the GPU finished the frame (every eye frame's whole render + copy, behind
+// whatever the GPU still had queued). Printed every 300 eye frames.
+struct LatencyStats {
+  std::atomic<uint64_t> totalUs{0}, maxUs{0}, count{0};
+};
+std::array<LatencyStats, 4> gLatency;  // index: stereoEye mode (1 left, 2 right, 3 mono)
+void noteLatency(int mode, uint64_t us) {
+  LatencyStats& stats = gLatency[mode];
+  stats.totalUs.fetch_add(us, std::memory_order_relaxed);
+  uint64_t max = stats.maxUs.load(std::memory_order_relaxed);
+  while (us > max && !stats.maxUs.compare_exchange_weak(max, us, std::memory_order_relaxed)) {
+  }
+  if (stats.count.fetch_add(1, std::memory_order_relaxed) + 1 == 300) {
+    const uint64_t total = stats.totalUs.exchange(0), peak = stats.maxUs.exchange(0);
+    stats.count.store(0);
+    std::fprintf(stderr, "Petari Stereo GPU: %s frames, submit to GPU done: mean %.2f ms, max %.1f ms (300 frames)\n",
+                 mode == 1 ? "left-eye" : (mode == 2 ? "right-eye" : "mono"), static_cast<double>(total) / 300.0 / 1000.0,
+                 static_cast<double>(peak) / 1000.0);
+  }
+}
 std::atomic<bool> gRequested{false};
 // Eye picture height in lines when the host upscales (MetalFX): the XFB is then drawn 1:1 into the top-left
 // 16:9 rectangle of that height and the host scales it up to the full image. 0: fill the whole image.
@@ -243,9 +264,11 @@ std::function<void()> stereo_encode(const Frame& frame, const wgpu::CommandEncod
   if (count == 0) {
     return {};
   }
-  return [pending, count] {
+  const int mode = frame.stereoEye;
+  return [pending, count, mode] {
     PetariNative::HostAllocationScope scope;
     using namespace aurora::webgpu;
+    const auto submitted = std::chrono::steady_clock::now();
     for (int i = 0; i < count; ++i) {
       Slot& slot = gEyes[pending[i].eye].slots[pending[i].slot];
       wgpu::SharedTextureMemoryEndAccessState end{};
@@ -253,10 +276,13 @@ std::function<void()> stereo_encode(const Frame& frame, const wgpu::CommandEncod
     }
     // Published once the GPU finished this frame's work (the callbacks run in ProcessEvents).
     g_queue.OnSubmittedWorkDone(wgpu::CallbackMode::AllowSpontaneous,
-                                [pending, count](wgpu::QueueWorkDoneStatus status, wgpu::StringView) {
+                                [pending, count, mode, submitted](wgpu::QueueWorkDoneStatus status, wgpu::StringView) {
                                   if (status != wgpu::QueueWorkDoneStatus::Success) {
                                     return;
                                   }
+                                  noteLatency(mode, static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                                                              std::chrono::steady_clock::now() - submitted)
+                                                                              .count()));
                                   for (int i = 0; i < count; ++i) {
                                     Eye& eye = gEyes[pending[i].eye];
                                     eye.latest.store(pending[i].slot, std::memory_order_release);

@@ -226,8 +226,11 @@ def patch_fifo(text):
       sPetariMirror.insert(sPetariMirror.end(), from, from + (limit - mirrored));
     }
     petariSyncBp = 0;
+    const auto petariBusyStart = std::chrono::steady_clock::now();
     const ProcessResult result = process(sPetariMirror.data() + (processed - sPetariMirrorBase),
                                          static_cast<uint32_t>(limit - processed));
+    petari_gx_processor_busy_add(static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - petariBusyStart).count()));
     const uint32_t syncBp = petariSyncBp;
     AURORA_ASSERT(result.bytesProcessed > 0 && result.bytesProcessed <= limit - processed,
                   "FIFO processor made invalid progress: processed {} of {} remaining bytes", result.bytesProcessed,

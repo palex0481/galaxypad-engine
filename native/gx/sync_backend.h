@@ -107,6 +107,10 @@ void petari_aurora_fifo_wake(void);                   /* breakpoint changed: re-
 const void* petari_aurora_cpu_fifo(void);             /* GXFifoObj last passed to GXSetCPUFifo, or null */
 const void* petari_aurora_gp_fifo(void);              /* GXFifoObj last passed to GXSetGPFifo, or null */
 
+/* Frame statistics: time the FIFO processor thread spent decoding GX commands into Aurora draws (process()). */
+void petari_gx_processor_busy_add(uint64_t ns);
+uint64_t petari_gx_processor_busy_total(void);        /* monotonic ns */
+
 #ifdef __cplusplus
 }
 #endif

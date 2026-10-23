@@ -332,27 +332,62 @@ void GameSystem::frameLoop() {
     }();
     // Smooth Motion draws after the update as well (its in-between frame needs this step's state).
     Stereo::beginStep();  // stereoscopic window (BETA), first: it turns Smooth Motion off while it is on
-    if (lowLatency || Stereo::active() || SmoothMotion::enabled()) {
+    if (Stereo::active() && !lowLatency) {
+        // Stereoscopic window, Wii order: both eyes are drawn first (from the previous step's state, like the flat window), then
+        // the update and animation run on the CPU while the GPU and the GX thread finish the right eye. The left eye is
+        // presented eye-only between the two draws. The eyes' camera comes from the previous step's 3D view stage.
+        MainLoopFramework::sManager->beginRender();
+        if (Stereo::beginEyes(true)) {
+            Stereo::beginEye(0);
+            draw();
+            MainLoopFramework::sManager->endRender();
+            Stereo::mark(Stereo::PhaseDrawLeft);  // the game thread's CPU time issuing the left eye's GX commands
+            MainLoopFramework::sManager->endFrame();
+            Stereo::presentLeftEye();
+            petari_gx_sync_wait_tokens_delivered();
+            Stereo::mark(Stereo::PhasePresentLeft);  // waiting for the left eye to drain, then presenting it
+            MainLoopFramework::sManager->beginRender();
+            Stereo::beginEye(1);
+            draw();
+            MainLoopFramework::sManager->endRender();
+            Stereo::endEyes();
+            Stereo::mark(Stereo::PhaseDrawRight);
+        } else {
+            draw();
+            MainLoopFramework::sManager->endRender();
+            Stereo::mark(Stereo::PhaseDrawRight);
+        }
+        update();
+        Stereo::mark(Stereo::PhaseUpdate);
+        calcAnim();
+        mObjHolder->captureIfAllowForScreenPreserver();
+        Stereo::mark(Stereo::PhaseCalcAnim);
+    } else if (lowLatency || Stereo::active() || SmoothMotion::enabled()) {
         // Smooth Motion (PETARI_SMOOTH_MOTION=1): draw and present a frame halfway
         // between the previous step and this one first, then the step itself.
         SmoothMotion::beginStep();
         MainLoopFramework::sManager->beginRender();
         update();
+        Stereo::mark(Stereo::PhaseUpdate);
         calcAnim();
         mObjHolder->captureIfAllowForScreenPreserver();
+        Stereo::mark(Stereo::PhaseCalcAnim);
         if (Stereo::beginEyes()) {
             // Stereoscopic window (BETA): the left eye is presented eye-only, the right eye is the step's frame.
             Stereo::beginEye(0);
             draw();
             MainLoopFramework::sManager->endRender();
             MainLoopFramework::sManager->endFrame();
+            Stereo::mark(Stereo::PhaseDrawLeft);
             Stereo::presentLeftEye();
             petari_gx_sync_wait_tokens_delivered();
+            Stereo::mark(Stereo::PhasePresentLeft);
             MainLoopFramework::sManager->beginRender();
             Stereo::beginEye(1);
             draw();
             MainLoopFramework::sManager->endRender();
             Stereo::endEyes();
+            Stereo::mark(Stereo::PhaseDrawRight);
         } else {
             if (SmoothMotion::beginBetween()) {
                 draw();
@@ -381,12 +416,15 @@ void GameSystem::frameLoop() {
 #endif
     MainLoopFramework::sManager->endFrame();
 #ifdef PETARI_NATIVE
+    Stereo::mark(Stereo::PhaseEndFrame);
     // Host window, events and Aurora frame boundary (native/app).
     petari_host_frame_seam();
+    Stereo::mark(Stereo::PhaseSeam);
     SmoothMotion::endStep();
 #endif
     MainLoopFramework::sManager->waitForRetrace();
 #ifdef PETARI_NATIVE
+    Stereo::mark(Stereo::PhaseRetrace);
     petari_host_frame_mark(PETARI_FRAME_MARK_RETRACE_DONE);
     // Draw done no longer waits for the frame's token-time EFB captures; the
     // token callbacks (star pointer, lens flare, talk Z peeks) finish here,

@@ -4,6 +4,8 @@
 
 #include "sync_backend.h"
 
+#include <atomic>
+
 #include <revolution/os.h>
 
 #include "petari/platform/gx_sync.hpp"
@@ -18,9 +20,19 @@ constexpr std::uint32_t kBpDrawDone = 0x45;
 constexpr std::uint32_t kBpToken = 0x47;
 constexpr std::uint32_t kBpTokenInterrupt = 0x48;
 
+std::atomic<std::uint64_t> gProcessorBusyNs{0};
+
 }  // namespace
 
 extern "C" {
+
+void petari_gx_processor_busy_add(uint64_t ns) {
+    gProcessorBusyNs.fetch_add(ns, std::memory_order_relaxed);
+}
+
+uint64_t petari_gx_processor_busy_total(void) {
+    return gProcessorBusyNs.load(std::memory_order_relaxed);
+}
 
 uint64_t petari_gx_sync_process_limit(uint64_t processed, uint64_t target) {
     return GXSync::processLimit(processed, target);

@@ -1,3 +1,6 @@
+#ifdef PETARI_NATIVE
+#include "Game/System/Stereo.hpp"
+#endif
 #include "Game/Screen/StarPointerDirector.hpp"
 #include "Game/Screen/LayoutCoreUtil.hpp"
 #include "Game/Screen/StarPointerController.hpp"
@@ -155,6 +158,11 @@ StarPointerPeekZ::StarPointerPeekZ() {
 }
 
 void StarPointerPeekZ::setDrawSyncToken() {
+#ifdef PETARI_NATIVE
+    if (Stereo::skipDrawSync()) {
+        return;
+    }
+#endif
     GXGetProjectionv(mProjectionParameters);
     GXGetViewportv(mViewportParameters);
     DrawSyncManager::sInstance->pushBreakPoint();

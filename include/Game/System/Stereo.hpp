@@ -21,14 +21,23 @@ bool active();
 void beginStep();
 // GameScene::calcAnim ran its 3D view stage this step.
 void noteViewStage();
-// After calcAnim: true if the step is drawn as two eye frames (else a mono frame).
-bool beginEyes();
+// True if the step is drawn as two eye frames (else a mono frame). Called after calcAnim (previousStep false: this
+// step's view stage must be ready) or, in the Wii order, before the update (previousStep true: the previous step's).
+bool beginEyes(bool previousStep = false);
+// True while the left eye is being drawn: the token-time EFB captures (star pointer, lens flare, talk Z peek) are
+// skipped there; the right eye's are the step's result either way, and each costs a render pass split and a GPU round trip.
+bool skipDrawSync();
 // Sets the camera for the eye (0 left, 1 right) and re-runs the 3D view stage.
 void beginEye(int eye);
 // After the right eye was drawn: restores the step's own camera.
 void endEyes();
 // Presents the left eye frame (eye-only) and opens the next one.
 void presentLeftEye();
+
+// Per-phase wall-clock timing of a stereo step (printed with the step statistics every 600 steps).
+enum Phase { PhaseUpdate, PhaseCalcAnim, PhaseDrawLeft, PhasePresentLeft, PhaseDrawRight, PhaseEndFrame, PhaseSeam, PhaseRetrace, PhaseCount };
+// Adds the time since the previous mark (or the step's start) to the phase.
+void mark(Phase phase);
 }  // namespace Stereo
 
 #endif

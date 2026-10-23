@@ -1,3 +1,6 @@
+#ifdef PETARI_NATIVE
+#include "Game/System/Stereo.hpp"
+#endif
 #include "Game/NPC/TalkDirector.hpp"
 #include "Game/LiveActor/LiveActor.hpp"
 #include "Game/LiveActor/Nerve.hpp"
@@ -48,6 +51,11 @@ TalkPeekZ::TalkPeekZ() : mDrawSync(DrawSyncManager::sInstance->setCallback(4, 1,
 }
 
 void TalkPeekZ::setDrawSyncToken() {
+#ifdef PETARI_NATIVE
+    if (Stereo::skipDrawSync()) {
+        return;
+    }
+#endif
     GXGetProjectionv(&_20);
     GXGetViewportv(&_3C);
     _8 = 0;

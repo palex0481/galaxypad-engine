@@ -1,3 +1,6 @@
+#ifdef PETARI_NATIVE
+#include "Game/System/Stereo.hpp"
+#endif
 #include "Game/Screen/LensFlare.hpp"
 #include "Game/LiveActor/Nerve.hpp"
 #include "Game/MapObj/BrightObj.hpp"
@@ -221,6 +224,11 @@ void LensFlareDirector::pauseOff() {
 }
 
 void LensFlareDirector::setDrawSyncToken() {
+#ifdef PETARI_NATIVE
+    if (Stereo::skipDrawSync()) {
+        return;
+    }
+#endif
     DrawSyncManager::sInstance->pushBreakPoint();
 
     GXSetDrawSync(_7C + mDrawSyncTokenIndex);
