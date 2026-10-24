@@ -35,13 +35,6 @@ void petari_present_set_stereo(int mode);
  * Returns 0 before petari_present_enable. Any thread. */
 int petari_present_content_aspect(unsigned* width, unsigned* height);
 
-/* Ambient glow (flat window): while enabled the render worker samples the presented image's edges about 20 times
- * a second. petari_present_glow_colors copies the newest 64 RGB values (192 bytes: 4 edges x 16 cells; top and
- * bottom left to right, right and left top to bottom) and returns a sequence number (0 until the first sample;
- * it increases with each new sample). Any thread. */
-void petari_present_glow_enable(int enabled);
-unsigned long long petari_present_glow_colors(unsigned char* rgb);
-
 /* Where the game image is presented, in window points. Returns 0 while there
  * is no surface. */
 int petari_present_image_rect(float* x, float* y, float* width, float* height);
