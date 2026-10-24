@@ -201,7 +201,7 @@ void CrystalCageMoving::updateHitSensor(HitSensor* pSensor) {
     } else {
         f32 radius = pSensor->mRadius;
         TPos3f joint_mtx;
-        joint_mtx.set(MR::getJointMtx(this, nullptr));
+        joint_mtx.set(MR::getJointMtx(this, 0));
         TVec3f up;
         joint_mtx.getYDir(up);
         TVec3f stack_14;
