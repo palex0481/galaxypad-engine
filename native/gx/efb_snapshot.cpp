@@ -97,7 +97,10 @@ void maybeDump(std::uint64_t ticket, const Snapshot& snapshot) {
                               snapshot.width, snapshot.height, rgb.data());
 }
 
-constexpr const char* shader = R"(
+// DEPTH_TYPE is texture_depth_2d, or texture_depth_multisampled_2d when the EFB uses MSAA (Aurora config.msaa,
+// PETARI_MSAA). The color view is then Aurora's resolved frame buffer; depth is read from sample 0, which is
+// what an occlusion peek (lens flare) needs.
+constexpr const char* shaderTemplate = R"(
 struct Params {
     dst: vec2u, src: vec2u,
     offset: vec2f, scale: vec2f,
@@ -105,7 +108,7 @@ struct Params {
 };
 struct Pixel { depth: u32, argb: u32, };
 @group(0) @binding(0) var color: texture_2d<f32>;
-@group(0) @binding(1) var depth: texture_depth_2d;
+@group(0) @binding(1) var depth: DEPTH_TYPE;
 @group(0) @binding(2) var<storage, read_write> pixels: array<Pixel>;
 @group(0) @binding(3) var<uniform> p: Params;
 @compute @workgroup_size(8, 8, 1)
@@ -150,6 +153,7 @@ struct Resources {
     // handles cannot be reused by other views while cached).
     wgpu::BindGroup binding;
     wgpu::TextureView boundColor, boundDepth;
+    std::uint32_t depthSamples = 1;
 };
 Resources& resources() {
     static Resources* instance = new Resources;
@@ -195,13 +199,18 @@ void returnReadback(wgpu::Buffer buffer, std::uint64_t generation) {
     }
 }
 
-Resources& prepareResources(std::uint64_t storageBytes) {
+Resources& prepareResources(std::uint64_t storageBytes, std::uint32_t depthSamples) {
     using aurora::webgpu::g_device;
     Resources& r = resources();
-    if (r.device.Get() != g_device.Get()) {
+    if (r.device.Get() != g_device.Get() || r.depthSamples != depthSamples) {
         r = {};
         r.device = g_device;
-        const wgpu::ShaderSourceWGSL wgsl{wgpu::ShaderSourceWGSL::Init{.code = shader}};
+        r.depthSamples = depthSamples;
+        std::string code = shaderTemplate;
+        const std::string token = "DEPTH_TYPE";
+        code.replace(code.find(token), token.size(),
+                     depthSamples > 1 ? "texture_depth_multisampled_2d" : "texture_depth_2d");
+        const wgpu::ShaderSourceWGSL wgsl{wgpu::ShaderSourceWGSL::Init{.code = code.c_str()}};
         const wgpu::ShaderModuleDescriptor moduleDesc{.nextInChain = &wgsl, .label = "Petari EFB capture"};
         const auto module = g_device.CreateShaderModule(&moduleDesc);
         const wgpu::ComputePipelineDescriptor pipelineDesc{.label = "Petari EFB capture",
@@ -232,9 +241,9 @@ aurora::gfx::AfterSubmitCallback encodeSnapshot(const wgpu::CommandEncoder& enco
     HostAllocationScope host;
     using aurora::webgpu::g_device;
     if (!source.color || !source.depth || !source.width || !source.height ||
-        source.samples != 1 || !ready) fail("invalid capture source (single-sample EFB required)");
+        source.samples == 0 || source.samples > 8 || !ready) fail("invalid capture source");
     const auto bytes = std::uint64_t(source.width) * source.height * sizeof(Pixel);
-    Resources& r = prepareResources(bytes);
+    Resources& r = prepareResources(bytes, source.samples);
     std::uint64_t generation = 0;
     const auto readback = takeReadback(bytes, generation);
     const Params params{source.width, source.height, source.size.width, source.size.height,

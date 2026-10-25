@@ -30,6 +30,11 @@ Frame take() noexcept;
 // False if nothing is drawn (black).
 bool bind_image(const Frame& frame, wgpu::BindGroup& out) noexcept;
 
+// Render worker: the pipeline that draws the XFB (bind_image's bind group): Aurora's copy pipeline, or with
+// PETARI_FXAA=1 (read once at start) an FXAA pass over the XFB in the same draw. Used by the flat present and
+// the stereoscopic eye images.
+const wgpu::RenderPipeline& image_pipeline() noexcept;
+
 // Opt-in PETARI_SURFACE_DUMP=<dir> (present_aurora.cpp): copies the final window image (the presented
 // frame plus the Dear ImGui overlay: Home menu, badges) to a PNG. Render worker only. prepare() makes the
 // surface a copy source once; encode() returns the work to run after the frame was submitted, or an empty

@@ -211,7 +211,7 @@ int encodeEye(const Frame& frame, const wgpu::CommandEncoder& encoder, int eye) 
     const auto w = std::min<uint32_t>(static_cast<uint32_t>(viewport.width), rectWidth - x);
     const auto h = std::min<uint32_t>(static_cast<uint32_t>(viewport.height), rectHeight - y);
     pass.SetScissorRect(x, y, w, h);
-    pass.SetPipeline(g_CopyPipeline);
+    pass.SetPipeline(image_pipeline());
     pass.SetBindGroup(0, bindGroup, 0, nullptr);
     pass.Draw(3);
     if (frame.dimOpacity > 0.f) {

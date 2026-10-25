@@ -579,6 +579,14 @@ int main(int argc, char** argv) {
     config.windowHeight = 720;
     config.logCallback = logMessage;
     config.logLevel = LOG_INFO;
+    // PETARI_MSAA=2 or 4: multisampled EFB (Aurora resolves it for EFB copies, peeks and the XFB). Off otherwise.
+    if (const char* msaa = std::getenv("PETARI_MSAA"); msaa != nullptr) {
+        const long samples = std::strtol(msaa, nullptr, 10);
+        if (samples == 2 || samples == 4) {
+            config.msaa = static_cast<uint32_t>(samples);
+            std::fprintf(stderr, "petari: MSAA %ldx\n", samples);
+        }
+    }
     const AuroraInfo info = aurora_initialize(1, argv, &config);
     if (info.window == nullptr || aurora_get_backend() != BACKEND_METAL) {
         std::fputs("petari: Metal initialization failed\n", stderr);

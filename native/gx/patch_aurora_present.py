@@ -294,7 +294,7 @@ def patch_aurora(text):
         '                             webgpu::g_graphicsConfig.surfaceConfiguration.height);\n'
         '        // Petari: VI black (or no XFB) leaves the cleared image black.\n'
         '        if (petariDrawImage) {\n'
-        '          pass.SetPipeline(webgpu::g_CopyPipeline);\n'
+        '          pass.SetPipeline(petariPresent.active ? petari_present::image_pipeline() : webgpu::g_CopyPipeline);\n'
         '          pass.SetBindGroup(0, presentBindGroup, 0, nullptr);\n'
         '          pass.Draw(3);\n'
         '        }\n'

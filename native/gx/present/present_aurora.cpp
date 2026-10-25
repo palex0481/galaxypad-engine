@@ -482,6 +482,101 @@ bool bind_image(const Frame& frame, wgpu::BindGroup& out) noexcept {
   return true;
 }
 
+namespace {
+// FXAA (PETARI_FXAA=1): the XFB is drawn with an FXAA filter (FXAA 3.11 "console"-style edge blend) instead of
+// a plain sample. Same bind group layout as Aurora's copy pipeline (sampler 0, texture 1), so bind_image's bind
+// group is used unchanged. The XFB is the finished frame, after every EFB copy and peek, so FXAA never changes
+// what the game reads back (lens flare occlusion and other EFB peeks).
+constexpr const char* kFxaaShader = R"(
+@group(0) @binding(0) var efb_sampler: sampler;
+@group(0) @binding(1) var efb_texture: texture_2d<f32>;
+struct VertexOutput { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, };
+var<private> pos: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(-1.0, 1.0), vec2(-1.0, -3.0), vec2(3.0, 1.0));
+var<private> uvs: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(0.0, 0.0), vec2(0.0, 2.0), vec2(2.0, 0.0));
+@vertex
+fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
+  var out: VertexOutput;
+  out.pos = vec4<f32>(pos[i], 0.0, 1.0);
+  out.uv = uvs[i];
+  return out;
+}
+fn tap(uv: vec2f) -> vec3f { return textureSampleLevel(efb_texture, efb_sampler, uv, 0.0).rgb; }
+fn luma(c: vec3f) -> f32 { return dot(c, vec3f(0.299, 0.587, 0.114)); }
+@fragment
+fn fs_fxaa(in: VertexOutput) -> @location(0) vec4<f32> {
+  let inv = 1.0 / vec2f(textureDimensions(efb_texture));
+  let uv = in.uv;
+  let rgbM = tap(uv);
+  let lNW = luma(tap(uv + vec2f(-1.0, -1.0) * inv));
+  let lNE = luma(tap(uv + vec2f(1.0, -1.0) * inv));
+  let lSW = luma(tap(uv + vec2f(-1.0, 1.0) * inv));
+  let lSE = luma(tap(uv + vec2f(1.0, 1.0) * inv));
+  let lM = luma(rgbM);
+  let lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+  let lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+  if (lMax - lMin < max(0.0312, lMax * 0.125)) { return vec4f(rgbM, 1.0); }
+  var dir = vec2f(-((lNW + lNE) - (lSW + lSE)), (lNW + lSW) - (lNE + lSE));
+  let reduce = max((lNW + lNE + lSW + lSE) * (0.25 / 8.0), 1.0 / 128.0);
+  let rcp = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);
+  dir = clamp(dir * rcp, vec2f(-8.0), vec2f(8.0)) * inv;
+  let rgbA = 0.5 * (tap(uv + dir * (1.0 / 3.0 - 0.5)) + tap(uv + dir * (2.0 / 3.0 - 0.5)));
+  let rgbB = rgbA * 0.5 + 0.25 * (tap(uv - dir * 0.5) + tap(uv + dir * 0.5));
+  let lB = luma(rgbB);
+  if (lB < lMin || lB > lMax) { return vec4f(rgbA, 1.0); }
+  return vec4f(rgbB, 1.0);
+}
+)";
+
+bool fxaaEnabled() {
+  static const bool enabled = [] {
+    const char* value = std::getenv("PETARI_FXAA");
+    const bool on = value != nullptr && value[0] == '1';
+    if (on) std::fprintf(stderr, "Petari present: FXAA on\n");
+    return on;
+  }();
+  return enabled;
+}
+}  // namespace
+
+const wgpu::RenderPipeline& image_pipeline() noexcept {
+  using namespace aurora::webgpu;
+  if (!fxaaEnabled()) return g_CopyPipeline;
+  static wgpu::Device* device = new wgpu::Device;
+  static wgpu::RenderPipeline* pipeline = new wgpu::RenderPipeline;
+  if (device->Get() != g_device.Get() || !*pipeline) {
+    PetariNative::HostAllocationScope host;
+    *device = g_device;
+    const wgpu::ShaderSourceWGSL wgsl{wgpu::ShaderSourceWGSL::Init{.code = kFxaaShader}};
+    const wgpu::ShaderModuleDescriptor moduleDesc{.nextInChain = &wgsl, .label = "Petari FXAA"};
+    const auto module = g_device.CreateShaderModule(&moduleDesc);
+    const std::array layoutEntries{
+        wgpu::BindGroupLayoutEntry{.binding = 0, .visibility = wgpu::ShaderStage::Fragment,
+                                   .sampler = wgpu::SamplerBindingLayout{.type = wgpu::SamplerBindingType::Filtering}},
+        wgpu::BindGroupLayoutEntry{.binding = 1, .visibility = wgpu::ShaderStage::Fragment,
+                                   .texture = wgpu::TextureBindingLayout{.sampleType = wgpu::TextureSampleType::Float,
+                                                                         .viewDimension = wgpu::TextureViewDimension::e2D}},
+    };
+    const wgpu::BindGroupLayoutDescriptor bglDesc{.entryCount = layoutEntries.size(), .entries = layoutEntries.data()};
+    const auto bindGroupLayout = g_device.CreateBindGroupLayout(&bglDesc);
+    const wgpu::PipelineLayoutDescriptor layoutDesc{.bindGroupLayoutCount = 1, .bindGroupLayouts = &bindGroupLayout};
+    const auto layout = g_device.CreatePipelineLayout(&layoutDesc);
+    const std::array targets{wgpu::ColorTargetState{.format = g_graphicsConfig.surfaceConfiguration.format,
+                                                    .writeMask = wgpu::ColorWriteMask::All}};
+    const wgpu::FragmentState fragment{.module = module, .entryPoint = "fs_fxaa", .targetCount = targets.size(),
+                                       .targets = targets.data()};
+    const wgpu::RenderPipelineDescriptor desc{
+        .label = "Petari FXAA XFB pipeline",
+        .layout = layout,
+        .vertex = wgpu::VertexState{.module = module, .entryPoint = "vs_main"},
+        .primitive = wgpu::PrimitiveState{.topology = wgpu::PrimitiveTopology::TriangleList},
+        .multisample = wgpu::MultisampleState{.count = 1, .mask = UINT32_MAX},
+        .fragment = &fragment,
+    };
+    *pipeline = g_device.CreateRenderPipeline(&desc);
+  }
+  return *pipeline;
+}
+
 void draw_dim(const wgpu::RenderPassEncoder& pass, const Frame& frame) noexcept {
   using namespace aurora::webgpu;
   if (!gDimTexture) {
